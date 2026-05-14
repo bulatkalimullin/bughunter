@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: bhs-
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      steps:
+        - - name: run-bhs
+            template: bhs-container
+    - name: bhs-container
+      container:
+        image: bughunter-swarm:local
+        command: ["python", "-m", "bhs.cli", "--repo", "/workspace"]
+        resources:
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
