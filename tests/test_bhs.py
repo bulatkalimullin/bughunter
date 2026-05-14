@@ -9,6 +9,7 @@ from bhs.buglogger.bounty import bounty_usd
 from bhs.buglogger.dedup import dedupe_bugs
 from bhs.config import Settings
 from bhs.graph import compile_swarm
+from bhs.nodes.pipeline import bug_logger_node
 from bhs.sandbox.docker_runner import SandboxRunner
 from bhs.state import BugSchema, BugType, Impact, Reproducibility, Severity
 from bhs.storage.artifacts import LocalArtifactStore
@@ -136,6 +137,96 @@ def test_feedback_loop_two_iterations(tmp_path: Path) -> None:
     final = g.invoke(initial)
     assert int(final.get("iteration_count", -1)) == 1
     assert str(final.get("next_action")) == "finalize"
+
+
+def test_feedback_loop_five_iterations(tmp_path: Path) -> None:
+    os.environ["BHS_SANDBOX_MODE"] = "local"
+    (tmp_path / "ok.py").write_text("y = 2\n", encoding="utf-8")
+    art = LocalArtifactStore(tmp_path / "art5")
+    settings = Settings(max_iterations=5, stop_bug_count=0)
+    g = compile_swarm(SandboxRunner(), art, tmp_path / "reports5", settings)
+    run_id = "loop-5"
+    initial = {
+        "run_id": run_id,
+        "repo_path": str(tmp_path),
+        "repo_hash": "",
+        "language": "python",
+        "framework": "",
+        "config": {},
+        "test_budget": 5,
+        "sandbox_limits": {"cpu_seconds": 120.0, "memory_mb": 512, "disk_mb": 256, "pids_max": 64},
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "variants": [],
+        "hypothesis_set": [],
+        "node_statuses": {},
+        "crash_or_leak": False,
+        "multi_variant": False,
+        "phase": "init",
+        "status": "running",
+        "next_action": "spawn_agent",
+        "last_hypervisor": {},
+        "reduced_scope": False,
+        "artifacts": [],
+        "bugs_found": [],
+        "metrics": {},
+        "runtime_logs": "",
+        "coverage_pct": 0.0,
+        "ab_metrics": {},
+        "ab_metric_samples": {},
+    }
+    final = g.invoke(initial)
+    assert int(final.get("iteration_count", -1)) == 4
+    assert int((final.get("metrics") or {}).get("tests_run", 0)) == 5
+
+
+def test_bug_logger_early_stop_by_deduped_count(tmp_path: Path) -> None:
+    settings = Settings(stop_bug_count=2, max_iterations=100)
+    raw = [
+        {
+            "id": "a",
+            "type": "logic",
+            "severity": "low",
+            "cvss_score": 3.0,
+            "reproducibility": "often",
+            "impact": "slowdown",
+            "code_location": "a.py:1",
+            "root_cause": "issue a",
+        },
+        {
+            "id": "b",
+            "type": "logic",
+            "severity": "low",
+            "cvss_score": 3.0,
+            "reproducibility": "often",
+            "impact": "slowdown",
+            "code_location": "b.py:2",
+            "root_cause": "issue b",
+        },
+    ]
+    state: dict = {
+        "run_id": "early",
+        "repo_path": str(tmp_path),
+        "repo_hash": "abc",
+        "bugs_found": raw,
+        "iteration_count": 0,
+        "max_iterations": 100,
+        "artifacts": [],
+        "node_statuses": {},
+        "phase": "runtime",
+        "status": "running",
+        "next_action": "spawn_agent",
+    }
+    out = bug_logger_node(state, tmp_path / "rep_early", settings)
+    assert out["next_action"] == "finalize"
+    assert len(out["bugs_found"]) >= 2
+
+
+def test_resolved_sandbox_cpu_seconds() -> None:
+    s = Settings(max_iterations=250)
+    assert s.resolved_sandbox_cpu_seconds() == pytest.approx(750.0)
+    s2 = Settings(max_iterations=250, sandbox_cpu_budget_seconds=2000.0)
+    assert s2.resolved_sandbox_cpu_seconds() == pytest.approx(2000.0)
 
 
 def test_ollama_generate_pytest(monkeypatch: pytest.MonkeyPatch) -> None:

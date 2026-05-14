@@ -49,7 +49,7 @@ def build_swarm_graph(
         return ab_tester_node(state, artifacts)
 
     def _log(state: BHSState) -> dict[str, Any]:
-        return bug_logger_node(state, report_dir)
+        return bug_logger_node(state, report_dir, settings)
 
     g.add_node("runtime_executor", _runtime)
     g.add_node("memory_profiler", _mem)

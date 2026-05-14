@@ -315,7 +315,7 @@ def ab_tester_node(state: BHSState, artifacts: ArtifactStore) -> dict[str, Any]:
         }
 
 
-def bug_logger_node(state: BHSState, report_dir: Path) -> dict[str, Any]:
+def bug_logger_node(state: BHSState, report_dir: Path, settings: Settings) -> dict[str, Any]:
     tracer = get_tracer()
     with tracer.start_as_current_span("node.bug_logger"):
         BHS_METRICS.node_runs.labels(node="bug_logger").inc()
@@ -333,10 +333,16 @@ def bug_logger_node(state: BHSState, report_dir: Path) -> dict[str, Any]:
         ns["bug_logger"] = {"status": "success", "attempts": ns.get("bug_logger", {}).get("attempts", 0) + 1}
         it = int(state.get("iteration_count", 0))
         mx = max(1, int(state.get("max_iterations", 1)))
-        next_loop = "spawn_agent" if it < mx - 1 else "finalize"
+        deduped = list(out["bugs"])
+        early = int(settings.stop_bug_count) > 0 and len(deduped) >= int(settings.stop_bug_count)
+        next_loop = (
+            "finalize"
+            if early
+            else ("spawn_agent" if it < mx - 1 else "finalize")
+        )
         merged_state = {
             **dict(state),
-            "bugs_found": out["bugs"],
+            "bugs_found": deduped,
             "phase": "logging",
             "artifacts": [*list(state.get("artifacts") or []), out["report_path"]],
             "status": "success",
@@ -348,6 +354,7 @@ def bug_logger_node(state: BHSState, report_dir: Path) -> dict[str, Any]:
             "phase": "logging",
             "status": "success",
             "next_action": next_loop,
+            "bugs_found": deduped,
             "artifacts": [out["report_path"], *out["drafts"]],
             "node_statuses": ns,
             "last_hypervisor": hv.model_dump(),
