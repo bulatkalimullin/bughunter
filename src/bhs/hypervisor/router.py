@@ -52,6 +52,11 @@ def reduce_scope(state: BHSState) -> dict[str, Any]:
             "memory_mb": max(512, lim.memory_mb // 2),
             "disk_mb": max(256, lim.disk_mb // 2),
             "pids_max": max(32, lim.pids_max // 2),
+            **(
+                {"cpu_cores": max(0.25, (lim.cpu_cores or 1.0) * 0.5)}
+                if lim.cpu_cores is not None
+                else {}
+            ),
         },
         "reduced_scope": True,
         "test_budget": max(1, (state.get("test_budget") or 10) // 2),
