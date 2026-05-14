@@ -23,7 +23,27 @@ BHS_SANDBOX_MODE=local bhs-run --repo .
 bhs-run --repo . --metrics-port 9108
 ```
 
-Переменные: см. [`src/bhs/config.py`](src/bhs/config.py) (`BHS_*`), `OTEL_EXPORTER_OTLP_ENDPOINT`, `BHS_SECCOMP_PROFILE`, `BHS_SANDBOX_IMAGE`.
+Переменные: см. [`src/bhs/config.py`](src/bhs/config.py) (`BHS_*`), `OTEL_EXPORTER_OTLP_ENDPOINT`, `BHS_SECCOMP_PROFILE`, `BHS_SANDBOX_IMAGE`. Пример — [.env.example](.env.example).
+
+### Минимальное окружение
+
+Только Python и зависимости; sandbox на хосте:
+
+```bash
+BHS_SANDBOX_MODE=local bhs-run --repo .
+```
+
+Подробнее: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+
+### Ollama (опционально)
+
+Поднимите Ollama ([deploy/docker-compose.llm.yml](deploy/docker-compose.llm.yml)), выполните `ollama pull gemma3:1b`, затем:
+
+```bash
+export BHS_OLLAMA_ENABLED=true
+export BHS_OLLAMA_MODEL=gemma3:1b
+BHS_SANDBOX_MODE=local bhs-run --repo .
+```
 
 ## Сборка sandbox-образа
 
@@ -34,8 +54,10 @@ docker build -t bughunter-sandbox:local -f docker/sandbox/Dockerfile .
 ## Документация
 
 - [docs/BHS_IMPLEMENTATION.md](docs/BHS_IMPLEMENTATION.md) — чеклист и DAG.
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) — минимальное и полное окружение, Ollama.
 - [docs/prompts/hypervisor_system_v1.txt](docs/prompts/hypervisor_system_v1.txt) — системный промпт HyperVisor.
 - [deploy/docker-compose.observability.yml](deploy/docker-compose.observability.yml) — MinIO, Redis, Prometheus, Grafana, Loki (черновой стек).
+- [deploy/docker-compose.llm.yml](deploy/docker-compose.llm.yml) — Ollama для LLM-тестов.
 
 ## Участие и политики
 

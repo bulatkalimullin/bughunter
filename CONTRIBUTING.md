@@ -38,7 +38,7 @@ BHS_SANDBOX_MODE=local bhs-run --repo .
 
 ## Архитектура и backlog
 
-См. [docs/BHS_IMPLEMENTATION.md](docs/BHS_IMPLEMENTATION.md): DAG, чеклист реализованного и оставшейся работы.
+См. [docs/BHS_IMPLEMENTATION.md](docs/BHS_IMPLEMENTATION.md): DAG, чеклист реализованного и оставшейся работы. Окружение и Ollama: [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [.env.example](.env.example).
 
 ## Pull requests
 
