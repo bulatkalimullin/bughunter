@@ -9,7 +9,14 @@ from typing import Any
 
 from scipy import stats
 
-from bhs.hypervisor.router import build_hypervisor_response, repo_hash_from_path
+from bhs.config import Settings
+from bhs.hypervisor.router import (
+    QuotaExceeded,
+    build_hypervisor_response,
+    check_quotas,
+    repo_hash_from_path,
+)
+from bhs.llm.ollama import generate_pytest_module
 from bhs.observability.audit import audit
 from bhs.observability.metrics import BHS_METRICS
 from bhs.observability.otel import get_tracer
@@ -94,7 +101,17 @@ def code_analyzer_node(state: BHSState) -> dict[str, Any]:
         }
 
 
-def test_generator_node(state: BHSState) -> dict[str, Any]:
+def _smoke_test_source() -> str:
+    return "\n".join(
+        [
+            "def test_smoke():",
+            "    assert True",
+            "",
+        ]
+    )
+
+
+def test_generator_node(state: BHSState, settings: Settings) -> dict[str, Any]:
     tracer = get_tracer()
     with tracer.start_as_current_span("node.test_generator"):
         BHS_METRICS.node_runs.labels(node="test_generator").inc()
@@ -102,16 +119,19 @@ def test_generator_node(state: BHSState) -> dict[str, Any]:
         gen_dir = repo / ".bhs" / "generated"
         gen_dir.mkdir(parents=True, exist_ok=True)
         test_file = gen_dir / "test_bhs_smoke.py"
-        test_file.write_text(
-            "\n".join(
-                [
-                    "def test_smoke():",
-                    "    assert True",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
+        hyps = list(state.get("hypothesis_set") or [])
+        bugs = list(state.get("bugs_found") or [])
+        summary_bits = [str(b.get("root_cause", ""))[:200] for b in bugs[:20]]
+        summary = "\n".join(summary_bits) if summary_bits else "(no static findings)"
+        body = generate_pytest_module(
+            settings,
+            language=str(state.get("language") or "unknown"),
+            hypothesis_set=hyps,
+            findings_summary=summary,
         )
+        if body is None:
+            body = _smoke_test_source()
+        test_file.write_text(body, encoding="utf-8")
         ns = dict(state.get("node_statuses") or {})
         ns["test_generator"] = {"status": "success", "attempts": ns.get("test_generator", {}).get("attempts", 0) + 1}
         audit(state.get("run_id", ""), "test_generator", state, "tests_materialized", {"path": str(test_file)})
@@ -127,6 +147,24 @@ def runtime_executor_node(state: BHSState, sandbox: SandboxRunner, artifacts: Ar
     tracer = get_tracer()
     with tracer.start_as_current_span("node.runtime_executor"):
         BHS_METRICS.node_runs.labels(node="runtime_executor").inc()
+        try:
+            check_quotas(state)
+        except QuotaExceeded as e:
+            return {
+                "phase": "runtime",
+                "status": "partial",
+                "next_action": "finalize",
+                "runtime_logs": str(e),
+                "crash_or_leak": False,
+                "multi_variant": len(state.get("variants") or []) > 1,
+                "artifacts": [],
+                "bugs_found": [],
+                "metrics": dict(state.get("metrics") or {}),
+                "node_statuses": {
+                    **dict(state.get("node_statuses") or {}),
+                    "runtime_executor": {"status": "skipped", "attempts": 0, "last_error": str(e)},
+                },
+            }
         repo = str(Path(state.get("repo_path", ".")).resolve())
         limits = dict(state.get("sandbox_limits") or {})
         t0 = time.perf_counter()
@@ -144,12 +182,6 @@ def runtime_executor_node(state: BHSState, sandbox: SandboxRunner, artifacts: Ar
         metrics["cpu_sec"] = float(metrics.get("cpu_sec", 0.0)) + dt
         metrics["mem_mb"] = float(metrics.get("mem_mb", 0.0)) + (4096.0 if res.oom else 0.0)
         metrics["tests_run"] = int(metrics.get("tests_run", 0)) + 1
-        ns = dict(state.get("node_statuses") or {})
-        ns["runtime_executor"] = {
-            "status": "failed" if crash else "success",
-            "attempts": ns.get("runtime_executor", {}).get("attempts", 0) + 1,
-            "last_error": res.stderr[:2000] if crash else None,
-        }
         new_bugs: list[dict[str, Any]] = []
         if crash:
             new_bugs.append(
@@ -166,6 +198,34 @@ def runtime_executor_node(state: BHSState, sandbox: SandboxRunner, artifacts: Ar
                     "patch_suggestion": "",
                 }
             )
+        ns = dict(state.get("node_statuses") or {})
+        ns["runtime_executor"] = {
+            "status": "failed" if crash else "success",
+            "attempts": ns.get("runtime_executor", {}).get("attempts", 0) + 1,
+            "last_error": res.stderr[:2000] if crash else None,
+        }
+        try:
+            check_quotas({**dict(state), "metrics": metrics})
+        except QuotaExceeded as e:
+            return {
+                "phase": "runtime",
+                "status": "partial",
+                "next_action": "finalize",
+                "runtime_logs": res.stderr + res.stdout + "\n" + str(e),
+                "crash_or_leak": crash or res.oom,
+                "multi_variant": len(state.get("variants") or []) > 1,
+                "artifacts": [uri],
+                "bugs_found": new_bugs,
+                "metrics": metrics,
+                "node_statuses": {
+                    **dict(state.get("node_statuses") or {}),
+                    "runtime_executor": {
+                        "status": "failed",
+                        "attempts": ns.get("runtime_executor", {}).get("attempts", 0),
+                        "last_error": str(e),
+                    },
+                },
+            }
         audit(state.get("run_id", ""), "runtime_executor", state, "runtime_complete", {"exit": res.exit_code})
         return {
             "phase": "runtime",
@@ -271,20 +331,23 @@ def bug_logger_node(state: BHSState, report_dir: Path) -> dict[str, Any]:
         )
         ns = dict(state.get("node_statuses") or {})
         ns["bug_logger"] = {"status": "success", "attempts": ns.get("bug_logger", {}).get("attempts", 0) + 1}
+        it = int(state.get("iteration_count", 0))
+        mx = max(1, int(state.get("max_iterations", 1)))
+        next_loop = "spawn_agent" if it < mx - 1 else "finalize"
         merged_state = {
             **dict(state),
             "bugs_found": out["bugs"],
             "phase": "logging",
             "artifacts": [*list(state.get("artifacts") or []), out["report_path"]],
             "status": "success",
-            "next_action": "finalize",
+            "next_action": next_loop,
         }
         hv = build_hypervisor_response(merged_state)  # type: ignore[arg-type]
         audit(state.get("run_id", ""), "bug_logger", state, "report", {"path": out["report_path"]})
         return {
             "phase": "logging",
             "status": "success",
-            "next_action": "finalize",
+            "next_action": next_loop,
             "artifacts": [out["report_path"], *out["drafts"]],
             "node_statuses": ns,
             "last_hypervisor": hv.model_dump(),
@@ -300,9 +363,7 @@ def route_post_runtime(state: BHSState) -> str:
 
 
 def route_feedback(state: BHSState) -> str:
-    it = int(state.get("iteration_count", 0))
-    max_it = int(state.get("max_iterations", 1))
-    if state.get("next_action") == "finalize" or it + 1 >= max_it:
+    if str(state.get("next_action") or "finalize") == "finalize":
         return "end"
     return "again"
 
