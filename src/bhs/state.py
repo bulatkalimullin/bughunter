@@ -62,6 +62,7 @@ class SandboxLimits(BaseModel):
     memory_mb: int = 4096
     disk_mb: int = 2048
     pids_max: int = 256
+    cpu_cores: float | None = None
 
 
 class NodeStatus(BaseModel):
