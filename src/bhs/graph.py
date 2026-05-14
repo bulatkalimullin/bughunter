@@ -5,12 +5,15 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
+from bhs.config import Settings
 from bhs.nodes.pipeline import (
     ab_tester_node,
     bug_logger_node,
     code_analyzer_node,
+    feedback_tick,
     hypervisor_init,
     memory_profiler_node,
+    route_feedback,
     route_post_runtime,
     runtime_executor_node,
     test_generator_node,
@@ -24,12 +27,17 @@ def build_swarm_graph(
     sandbox: SandboxRunner,
     artifacts: ArtifactStore,
     report_dir: Path,
+    settings: Settings,
 ) -> Any:
     g: StateGraph = StateGraph(BHSState)
 
     g.add_node("hypervisor_init", hypervisor_init)
     g.add_node("code_analyzer", code_analyzer_node)
-    g.add_node("test_generator", test_generator_node)
+
+    def _tg(state: BHSState) -> dict[str, Any]:
+        return test_generator_node(state, settings)
+
+    g.add_node("test_generator", _tg)
 
     def _runtime(state: BHSState) -> dict[str, Any]:
         return runtime_executor_node(state, sandbox, artifacts)
@@ -47,6 +55,7 @@ def build_swarm_graph(
     g.add_node("memory_profiler", _mem)
     g.add_node("ab_tester", _ab)
     g.add_node("bug_logger", _log)
+    g.add_node("feedback_tick", feedback_tick)
 
     g.set_entry_point("hypervisor_init")
     g.add_edge("hypervisor_init", "code_analyzer")
@@ -63,9 +72,22 @@ def build_swarm_graph(
     )
     g.add_edge("memory_profiler", "bug_logger")
     g.add_edge("ab_tester", "bug_logger")
-    g.add_edge("bug_logger", END)
+    g.add_conditional_edges(
+        "bug_logger",
+        route_feedback,
+        {
+            "again": "feedback_tick",
+            "end": END,
+        },
+    )
+    g.add_edge("feedback_tick", "test_generator")
     return g
 
 
-def compile_swarm(sandbox: SandboxRunner, artifacts: ArtifactStore, report_dir: Path) -> Any:
-    return build_swarm_graph(sandbox, artifacts, report_dir).compile()
+def compile_swarm(
+    sandbox: SandboxRunner,
+    artifacts: ArtifactStore,
+    report_dir: Path,
+    settings: Settings,
+) -> Any:
+    return build_swarm_graph(sandbox, artifacts, report_dir, settings).compile()
