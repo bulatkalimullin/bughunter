@@ -57,9 +57,14 @@ def main() -> None:
             "memory_mb": 2048,
             "disk_mb": 1024,
             "pids_max": 128,
+            **(
+                {"cpu_cores": float(settings.sandbox_cpu_cores)}
+                if settings.sandbox_cpu_cores is not None
+                else {}
+            ),
         },
         "iteration_count": 0,
-        "max_iterations": 1,
+        "max_iterations": int(settings.max_iterations),
         "variants": list(args.variants),
         "hypothesis_set": [],
         "node_statuses": {},
@@ -94,7 +99,7 @@ def main() -> None:
 
     sandbox = SandboxRunner()
     report_dir = settings.artifact_local_dir / "reports"
-    graph = compile_swarm(sandbox, artifacts, report_dir)
+    graph = compile_swarm(sandbox, artifacts, report_dir, settings)
 
     t0 = time.perf_counter()
     final = graph.invoke(initial)
