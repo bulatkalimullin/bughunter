@@ -6,13 +6,14 @@
 
 ```mermaid
 flowchart TB
-  hv[HyperVisor]
-  ca[CodeAnalyzer]
-  tg[TestGenerator]
-  re[RuntimeExecutor]
-  mp[MemoryProfiler]
-  ab[ABTester]
-  bl[BugLogger]
+  hv[hypervisor_init]
+  ca[code_analyzer]
+  tg[test_generator]
+  re[runtime_executor]
+  mp[memory_profiler]
+  ab[ab_tester]
+  bl[bug_logger]
+  ft[feedback_tick]
   hv --> ca
   ca --> tg
   tg --> re
@@ -21,9 +22,11 @@ flowchart TB
   re -->|log| bl
   mp --> bl
   ab --> bl
+  bl -->|again| ft
+  ft --> tg
 ```
 
-В коде: [`src/bhs/graph.py`](../src/bhs/graph.py), входная нода `hypervisor_init`.
+В коде: [`src/bhs/graph.py`](../src/bhs/graph.py), входная нода `hypervisor_init`; условный выход после `bug_logger` — [`route_feedback`](../src/bhs/nodes/pipeline.py) (`again` → `feedback_tick` → снова `test_generator`, иначе `END`).
 
 ## Чеклист (отслеживание)
 
@@ -47,7 +50,8 @@ flowchart TB
 - [x] **Каркас DAG** — LangGraph [`src/bhs/graph.py`](../src/bhs/graph.py)
 - [x] **MVP-цепочка** — `hypervisor_init` → `code_analyzer` → `test_generator` → `runtime_executor` → `bug_logger`
 - [x] **Условные ветки** — `memory_profiler`, `ab_tester`
-- [x] **Полный feedback-loop** до convergence — [`src/bhs/graph.py`](../src/bhs/graph.py): `bug_logger` → `feedback_tick` → `test_generator` при `next_action=spawn_agent`; лимит итераций `max_iterations` / `BHS_MAX_ITERATIONS` (см. [`cli.py`](../src/bhs/cli.py))
+- [x] **Полный feedback-loop** — [`src/bhs/graph.py`](../src/bhs/graph.py): `bug_logger` → `route_feedback` → `feedback_tick` → `test_generator` при `next_action=spawn_agent`; лимит **`max_iterations`** / `BHS_MAX_ITERATIONS`; ранний **`finalize`** при **`BHS_STOP_BUG_COUNT`** и достаточном числе dedupe-багов в [`bug_logger_node`](../src/bhs/nodes/pipeline.py)
+- [x] **Квота CPU под длинные прогоны** — `BHS_SANDBOX_CPU_BUDGET_SECONDS` или авто `max(120, 3 * max_iterations)` через [`Settings.resolved_sandbox_cpu_seconds`](../src/bhs/config.py) в [`cli.py`](../src/bhs/cli.py)
 
 ### Ноды и инструменты
 
@@ -56,7 +60,7 @@ flowchart TB
 - [x] **RuntimeExecutorNode** — `python -m compileall` в sandbox
 - [x] **MemoryProfilerNode** — эвристика по логам
 - [x] **ABTesterNode** — `scipy.stats.ttest_ind` при `ab_metric_samples` и ≥2 вариантах
-- [x] **BugLoggerNode** — dedup, bounty, Markdown, черновики GitHub ([`buglogger/`](../src/bhs/buglogger/))
+- [x] **BugLoggerNode** — dedup, bounty, Markdown, черновики GitHub ([`buglogger/`](../src/bhs/buglogger/)); учёт `Settings` для раннего выхода по числу багов
 
 ### Наблюдаемость и CI
 
@@ -73,11 +77,14 @@ flowchart TB
 
 ---
 
-## LLM / Ollama и окружение
+## LLM / Ollama, bootstrap и Docker
 
 - [x] **Переменные `BHS_OLLAMA_*`** — [`src/bhs/config.py`](../src/bhs/config.py), по умолчанию модель `gemma3:1b`
 - [x] **HTTP-клиент Ollama** — [`src/bhs/llm/ollama.py`](../src/bhs/llm/ollama.py), `/api/chat`, fallback на смоук-тест
+- [x] **Bootstrap** — [`src/bhs/dev_bootstrap.py`](../src/bhs/dev_bootstrap.py): Ollama compose, observability, сборка sandbox-образа; пути — [`paths.py`](../src/bhs/paths.py)
 - [x] **Docker Compose для Ollama** — [`deploy/docker-compose.llm.yml`](../deploy/docker-compose.llm.yml)
+- [x] **Корневой compose приложения** — [`docker-compose.yml`](../docker-compose.yml) + образ [`docker/bhs/Dockerfile`](../docker/bhs/Dockerfile), `include` LLM и observability
+- [x] **`BHS_REPO_PATH` / `resolve_run_repo`** — цель анализа из env, см. [`cli.py`](../src/bhs/cli.py)
 - [x] **Пример env** — [`.env.example`](../.env.example), гайд [docs/ENVIRONMENT.md](ENVIRONMENT.md)
 
 ---
@@ -136,4 +143,4 @@ flowchart TB
 ### Документация
 
 - [ ] **PlantUML**-версия DAG (опционально)
-- [x] **Runbook окружения** — [docs/ENVIRONMENT.md](ENVIRONMENT.md), [.env.example](../.env.example); seccomp/MinIO/Redis — см. существующие compose и [docker/seccomp/README.md](../docker/seccomp/README.md)
+- [x] **Runbook окружения** — [docs/ENVIRONMENT.md](ENVIRONMENT.md), [README](../README.md), [.env.example](../.env.example); bootstrap, итерации, корневой compose; seccomp/MinIO/Redis — [docker/seccomp/README.md](../docker/seccomp/README.md) и `deploy/docker-compose.*`
