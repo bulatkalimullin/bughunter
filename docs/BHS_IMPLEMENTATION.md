@@ -47,7 +47,7 @@ flowchart TB
 - [x] **Каркас DAG** — LangGraph [`src/bhs/graph.py`](../src/bhs/graph.py)
 - [x] **MVP-цепочка** — `hypervisor_init` → `code_analyzer` → `test_generator` → `runtime_executor` → `bug_logger`
 - [x] **Условные ветки** — `memory_profiler`, `ab_tester`
-- [ ] **Полный feedback-loop** до convergence — заготовки `route_feedback` в [`pipeline.py`](../src/bhs/nodes/pipeline.py); по умолчанию один проход (`max_iterations`)
+- [x] **Полный feedback-loop** до convergence — [`src/bhs/graph.py`](../src/bhs/graph.py): `bug_logger` → `feedback_tick` → `test_generator` при `next_action=spawn_agent`; лимит итераций `max_iterations` / `BHS_MAX_ITERATIONS` (см. [`cli.py`](../src/bhs/cli.py))
 
 ### Ноды и инструменты
 
@@ -73,16 +73,25 @@ flowchart TB
 
 ---
 
+## LLM / Ollama и окружение
+
+- [x] **Переменные `BHS_OLLAMA_*`** — [`src/bhs/config.py`](../src/bhs/config.py), по умолчанию модель `gemma3:1b`
+- [x] **HTTP-клиент Ollama** — [`src/bhs/llm/ollama.py`](../src/bhs/llm/ollama.py), `/api/chat`, fallback на смоук-тест
+- [x] **Docker Compose для Ollama** — [`deploy/docker-compose.llm.yml`](../deploy/docker-compose.llm.yml)
+- [x] **Пример env** — [`.env.example`](../.env.example), гайд [docs/ENVIRONMENT.md](ENVIRONMENT.md)
+
+---
+
 ## Оставшаяся работа (backlog)
 
 Ниже — что по смыслу **ещё не доведено** до уровня из исходного плана BHS (сверх уже сделанного MVP).
 
 ### Оркестрация и HyperVisor
 
-- [ ] **Feedback-loop в графе**: ребро `bug_logger` → `test_generator` (или отдельная нода), критерии **convergence** / лимит итераций, перенос гипотез и метрик в следующий цикл
+- [x] **Feedback-loop в графе**: `bug_logger` → условный переход → `feedback_tick` → `test_generator`; лимит `max_iterations` ([`graph.py`](../src/bhs/graph.py))
 - [ ] **Retry/fallback в DAG**: использовать `should_retry_node` / `reduce_scope` из [`router.py`](../src/bhs/hypervisor/router.py) при падении `runtime_executor`, а не только хелперы «вне графа»
 - [ ] **Параллельные ветки** графа (несколько репо/вариантов одновременно) и **conflict resolution** при конфликтующих выводах нод
-- [ ] **Планировщик квот**: жёсткая остановка при `QuotaExceeded` с переходом в `finalize`/`abort` и отчётом
+- [x] **Планировщик квот (MVP)**: `check_quotas` в начале и после шага `runtime_executor` — при превышении `QuotaExceeded` переход к `finalize` и `status=partial` ([`pipeline.py`](../src/bhs/nodes/pipeline.py))
 
 ### Состояние и хранилища
 
@@ -92,7 +101,8 @@ flowchart TB
 
 ### Песочница и безопасность
 
-- [ ] **Явные лимиты CPU** (`--cpus` / `NanoCpus` в Docker SDK), **tmpfs/размер диска** в контейнере, политика **SIGSEGV** (core dump в артефакты + reduced scope)
+- [x] **Лимиты CPU в Docker/Podman** — `sandbox_limits.cpu_cores`, `--cpus` / `nano_cpus` ([`docker_runner.py`](../src/bhs/sandbox/docker_runner.py)); `BHS_SANDBOX_CPU_CORES` в [`config.py`](../src/bhs/config.py) попадает в начальное состояние в [`cli.py`](../src/bhs/cli.py)
+- [ ] **tmpfs/размер диска** в контейнере, политика **SIGSEGV** (core dump в артефакты + reduced scope)
 - [ ] **Политика shell**: whitelist команд, «approve» для произвольного shell, запись патчей только в согласованные пути (аналог `/tmp/patches`)
 - [ ] **Готовый seccomp JSON** в репо (или скрипт генерации), а не только ссылка в README
 - [ ] **AppArmor/SELinux** профили при жёстких требованиях
@@ -100,7 +110,7 @@ flowchart TB
 ### Ноды и инструменты
 
 - [ ] **CodeAnalyzer**: tree-sitter, CFG/DFG, Semgrep/CodeQL, линтеры по языку, bandit/trivy, экспорт полноценного **HypothesisSet** под fuzz/property-based
-- [ ] **TestGenerator**: `hypothesis`/property-based, цели для AFL++/libFuzzer, mutation (Stryker/Mutmut), LLM-guided синтез (опционально)
+- [x] **TestGenerator (LLM MVP)**: синтез pytest через **Ollama** при `BHS_OLLAMA_ENABLED=true`; property-based / mutation — post-MVP
 - [ ] **RuntimeExecutor**: прогон реального **pytest**/тест-сьюта, **coverage**, опционально `strace`/OTel внутри контейнера, chaos (сеть/диск)
 - [ ] **MemoryProfiler**: Valgrind/heaptrack/pprof/`memory_profiler`, корреляция **file:line** по стекам, а не только эвристика по логам
 - [ ] **ABTester**: одинаковые **seeds**, нагрузка (k6/Locust), **confidence intervals** / effect size, **rollback** при деградации > threshold
@@ -125,4 +135,5 @@ flowchart TB
 
 ### Документация
 
-- [ ] **PlantUML**-версия DAG (опционально), runbook для операторов (seccomp, MinIO, Redis)
+- [ ] **PlantUML**-версия DAG (опционально)
+- [x] **Runbook окружения** — [docs/ENVIRONMENT.md](ENVIRONMENT.md), [.env.example](../.env.example); seccomp/MinIO/Redis — см. существующие compose и [docker/seccomp/README.md](../docker/seccomp/README.md)
