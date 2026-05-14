@@ -1,0 +1,22 @@
+# Ollama LLM service for BugHunter Swarm (local dev)
+#
+# First run — pull the default model used by BHS:
+#   docker compose -f deploy/docker-compose.llm.yml up -d
+#   docker compose -f deploy/docker-compose.llm.yml exec ollama ollama pull gemma3:1b
+#
+# Then on the host:
+#   export BHS_OLLAMA_ENABLED=true
+#   export BHS_OLLAMA_BASE_URL=http://127.0.0.1:11434
+#   BHS_SANDBOX_MODE=local bhs-run --repo .
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_models: {}
