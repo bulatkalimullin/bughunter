@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .bhs/
+.bhs.docker/
 .pytest_cache/
 .ruff_cache/
 *.sqlite

@@ -1,0 +1,44 @@
+# Все сервисы одним проектом: bhs + ollama + observability (см. include ниже).
+# Только bhs: docker compose up -d bhs
+# Всё стеком: docker compose up -d
+# Если поднимаете стек отсюда, держите BHS_AUTO_OBSERVABILITY=false (иначе bootstrap
+# снова вызовет compose для observability и возможен конфликт портов).
+#
+# Пример — другой проект на хосте:
+#   export TARGET_REPO="/home/you/project"
+#   docker compose run --rm bhs
+#
+# Анализ самого checkout BHS (по умолчанию TARGET_REPO=.):
+#   docker compose run --rm bhs
+#
+# По умолчанию: до 250 итераций feedback-loop или ранний выход при ≥ BHS_STOP_BUG_COUNT
+# багах после dedupe в bug_logger (см. docs/ENVIRONMENT.md). Переменные BHS_*: .env или -e.
+# Ollama на хосте: добавьте в environment BHS_OLLAMA_BASE_URL=http://host.docker.internal:11434
+# и extra_hosts ниже (профиль host).
+
+include:
+  - path: deploy/docker-compose.llm.yml
+  - path: deploy/docker-compose.observability.yml
+
+services:
+  bhs:
+    build:
+      context: .
+      dockerfile: docker/bhs/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BHS_SANDBOX_MODE: local
+      BHS_REPO_PATH: /repo
+      BHS_PROJECT_ROOT: /opt/bhs
+      BHS_OLLAMA_ENABLED: "false"
+      BHS_MAX_ITERATIONS: "250"
+      BHS_STOP_BUG_COUNT: "2"
+    volumes:
+      - type: bind
+        source: ${TARGET_REPO:-.}
+        target: /repo
+      - type: bind
+        source: ${BHS_DOCKER_STATE:-./.bhs.docker}
+        target: /workspace/.bhs

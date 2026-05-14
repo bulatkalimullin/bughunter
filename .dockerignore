@@ -1,0 +1,17 @@
+.venv
+.git
+.pytest_cache
+.ruff_cache
+.bhs
+**/__pycache__
+*.pyc
+*.egg-info
+dist
+build
+htmlcov
+.coverage
+coverage.xml
+*.sqlite
+*.sqlite-journal
+.env
+!.env.example
