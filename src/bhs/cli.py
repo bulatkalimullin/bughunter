@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from bhs.config import Settings
+from bhs.dev_bootstrap import run_dev_bootstrap
 from bhs.graph import compile_swarm
 from bhs.hypervisor.router import build_hypervisor_response
 from bhs.observability.audit import set_audit_store
@@ -18,14 +19,29 @@ from bhs.sandbox.docker_runner import SandboxRunner
 from bhs.storage.artifacts import build_artifact_store, retention_sweep_local
 
 
+def resolve_run_repo(cli_repo: Path | None, settings: Settings) -> Path:
+    """CLI ``--repo`` wins; else ``BHS_REPO_PATH``; else current directory."""
+    if cli_repo is not None:
+        return cli_repo.expanduser().resolve()
+    if settings.repo_path is not None:
+        return settings.repo_path.expanduser().resolve()
+    return Path(".").resolve()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="BugHunter Swarm CLI")
-    parser.add_argument("--repo", type=Path, default=Path("."), help="Path to repository to analyze")
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        default=None,
+        help="Path to repository to analyze (default: BHS_REPO_PATH or .)",
+    )
     parser.add_argument("--variants", nargs="*", default=[], help="Variant labels for AB branch")
     parser.add_argument("--metrics-port", type=int, default=0, help="Expose Prometheus metrics on port (0=off)")
     args = parser.parse_args()
 
     settings = Settings()
+    run_dev_bootstrap(settings)
     configure_otel()
     if args.metrics_port > 0:
         start_metrics_server(args.metrics_port)
@@ -43,7 +59,7 @@ def main() -> None:
     retention_sweep_local(settings.artifact_local_dir)
 
     run_id = str(uuid.uuid4())
-    repo = args.repo.resolve()
+    repo = resolve_run_repo(args.repo, settings)
     initial = {
         "run_id": run_id,
         "repo_path": str(repo),
@@ -53,7 +69,7 @@ def main() -> None:
         "config": {},
         "test_budget": 50,
         "sandbox_limits": {
-            "cpu_seconds": 120.0,
+            "cpu_seconds": float(settings.resolved_sandbox_cpu_seconds()),
             "memory_mb": 2048,
             "disk_mb": 1024,
             "pids_max": 128,
