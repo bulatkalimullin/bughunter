@@ -69,9 +69,9 @@ class SandboxRunner:
         timeout = float(limits.get("cpu_seconds", 300.0)) + 10.0
 
         if self._docker is not None and not self.use_podman:
-            return self._run_docker_sdk(command, workdir_host, mem_mb, pids_max, env)
+            return self._run_docker_sdk(command, workdir_host, mem_mb, pids_max, limits, env)
 
-        return self._run_cli(command, workdir_host, mem_mb, pids_max, timeout, env)
+        return self._run_cli(command, workdir_host, mem_mb, pids_max, timeout, env, limits)
 
     def _run_docker_sdk(
         self,
@@ -79,17 +79,24 @@ class SandboxRunner:
         workdir_host: str,
         mem_mb: int,
         pids_max: int,
+        limits: dict[str, Any],
         env: dict[str, str] | None,
     ) -> SandboxResult:
         sec: list[str] = []
         if self.seccomp_profile and Path(self.seccomp_profile).is_file():
             sec = [f"seccomp={self.seccomp_profile}"]
 
+        nano_cpus: int | None = None
+        raw_cpu = limits.get("cpu_cores")
+        if raw_cpu is not None:
+            try:
+                nano_cpus = int(float(raw_cpu) * 1e9)
+            except (TypeError, ValueError):
+                nano_cpus = None
+
         t0 = time.perf_counter()
         try:
-            out = self._docker.containers.run(  # type: ignore[union-attr]
-                self.image,
-                command,
+            run_kw: dict[str, Any] = dict(
                 remove=True,
                 network_mode="none",
                 mem_limit=f"{mem_mb}m",
@@ -104,6 +111,9 @@ class SandboxRunner:
                 detach=False,
                 user="nobody",
             )
+            if nano_cpus and nano_cpus > 0:
+                run_kw["nano_cpus"] = nano_cpus
+            out = self._docker.containers.run(self.image, command, **run_kw)  # type: ignore[union-attr]
             raw = out.decode(errors="replace") if isinstance(out, (bytes, bytearray)) else str(out)
             dt = time.perf_counter() - t0
             return SandboxResult(exit_code=0, stdout=raw, stderr="", duration_sec=dt)
@@ -139,6 +149,7 @@ class SandboxRunner:
         pids_max: int,
         timeout: float,
         env: dict[str, str] | None,
+        limits: dict[str, Any],
     ) -> SandboxResult:
         bin_name = "podman" if self.use_podman and _which_bin("podman") else "docker"
         if _which_bin(bin_name) is None:
@@ -169,6 +180,11 @@ class SandboxRunner:
             "--user",
             "nobody",
         ]
+        if limits.get("cpu_cores") is not None:
+            try:
+                cmd.extend(["--cpus", str(float(limits["cpu_cores"]))])
+            except (TypeError, ValueError):
+                pass
         if self.seccomp_profile and Path(self.seccomp_profile).is_file():
             cmd.extend(["--security-opt", f"seccomp={self.seccomp_profile}"])
         for k, v in (env or {}).items():
