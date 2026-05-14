@@ -1,0 +1,29 @@
+name: Bug Report
+description: Сообщить о некорректном поведении BugHunter Swarm
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Для уязвимостей используйте [SECURITY.md](../../SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло?
+      description: Ожидаемое и фактическое поведение.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Как воспроизвести?
+      description: Команды, версия Python, ОС, переменные окружения (без секретов).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи / вывод
+      description: Фрагмент stderr/stdout или JSON из `bhs-run`.
+    validations:
+      required: false
