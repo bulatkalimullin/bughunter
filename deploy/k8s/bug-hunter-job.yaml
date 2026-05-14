@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bug-hunter-swarm
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bhs
+          image: bughunter-swarm:local
+          imagePullPolicy: IfNotPresent
+          args: ["python", "-m", "bhs.cli", "--repo", "/workspace"]
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: repo
+              mountPath: /workspace
+              readOnly: true
+      volumes:
+        - name: repo
+          emptyDir: {}
